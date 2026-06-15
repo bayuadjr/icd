@@ -160,9 +160,9 @@ function App() {
   };
 
   const getScoreVerdict = (score) => {
-    if (score <= 30) return { label: 'Aman / Organik', class: 'verdict-low' };
-    if (score <= 60) return { label: 'Perlu Perhatian', class: 'verdict-med' };
-    return { label: 'Indikasi Kampanye Kuat', class: 'verdict-high' };
+    if (score <= 30) return { label: 'Aman / Organik', class: 'verdict-low', verdict: 'WISE', emoji: '🧠' };
+    if (score <= 60) return { label: 'Perlu Perhatian', class: 'verdict-med', verdict: 'NEUTRAL', emoji: '🤷' };
+    return { label: 'Indikasi Kampanye Kuat', class: 'verdict-high', verdict: 'SHAME', emoji: '💀' };
   };
 
   const loadFromHistory = async (id) => {
@@ -411,6 +411,12 @@ function App() {
                   <span className={`verdict-badge ${getScoreVerdict(result.campaign_score).class}`}>
                     {getScoreVerdict(result.campaign_score).label}
                   </span>
+
+                  {/* Final Verdict: SHAME / WISE / NEUTRAL */}
+                  <div className={`final-verdict ${getScoreVerdict(result.campaign_score).verdict === 'SHAME' ? 'verdict-shame' : getScoreVerdict(result.campaign_score).verdict === 'WISE' ? 'verdict-wise' : 'verdict-neutral'}`}>
+                    <span className="verdict-emoji">{getScoreVerdict(result.campaign_score).emoji}</span>
+                    <span className="verdict-text">{getScoreVerdict(result.campaign_score).verdict}</span>
+                  </div>
                 </div>
 
                 <hr style={{ border: 'none', borderTop: '1px solid var(--border-glass)', margin: '2rem 0' }} />

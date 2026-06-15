@@ -1,6 +1,7 @@
 import os
 import math
-import google.generativeai as genai
+import json
+from google import genai
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
@@ -8,8 +9,7 @@ load_dotenv()
 
 # Konfigurasi API Gemini
 api_key = os.getenv("GEMINI_API_KEY")
-if api_key:
-    genai.configure(api_key=api_key)
+client = genai.Client(api_key=api_key) if api_key else None
 
 class FallacyItem(BaseModel):
     fallacy_type: str = Field(description="Nama/tipe logical fallacy yang terdeteksi (misal: Ad hominem, Cherry-picking, False comparison, Temporal anchoring fallacy, Economic chain blindness, Whataboutism, Appeal to majority)")
@@ -22,33 +22,22 @@ class ArgumentAnalysisReport(BaseModel):
     general_feedback: str = Field(description="Evaluasi umum berbingkai edukatif dan objektif dalam bahasa Indonesia")
 
 def get_embeddings(texts: list[str]) -> list[list[float]]:
-    """
-    Mengambil representation vector (embeddings) dari teks menggunakan Gemini text-embedding-004.
-    """
     if not texts:
         return []
-    if not api_key:
-        # Fallback dummy embedding (768-dim) jika API key belum dikonfigurasi
+    if not client:
         return [[0.0] * 768 for _ in texts]
-    
+
     try:
-        # Gunakan API genai untuk mendapatkan embedding
-        result = genai.embed_content(
-            model="models/text-embedding-004",
-            content=texts,
-            task_type="clustering"
+        result = client.models.embed_content(
+            model="models/gemini-embedding-001",
+            contents=texts,
         )
-        return result['embedding']
+        return [r.values for r in result.embeddings]
     except Exception as e:
         print(f"Error generating embeddings: {e}")
-        # Fallback dummy
         return [[0.0] * 768 for _ in texts]
 
 def cosine_similarity(v1: list[float], v2: list[float]) -> float:
-    """
-    Kalkulasi cosine similarity murni menggunakan pustaka bawaan Python agar performa cepat
-    dan meminimalkan dependency library eksternal yang besar.
-    """
     dot_product = sum(x * y for x, y in zip(v1, v2))
     magnitude1 = math.sqrt(sum(x * x for x in v1))
     magnitude2 = math.sqrt(sum(y * y for y in v2))
@@ -57,10 +46,7 @@ def cosine_similarity(v1: list[float], v2: list[float]) -> float:
     return dot_product / (magnitude1 * magnitude2)
 
 def analyze_argument(text: str) -> ArgumentAnalysisReport:
-    """
-    Menganalisis logical fallacy dan kualitas argumen menggunakan model Gemini Flash.
-    """
-    if not api_key:
+    if not client:
         return ArgumentAnalysisReport(
             argument_quality_score=100,
             fallacies=[],
@@ -68,35 +54,44 @@ def analyze_argument(text: str) -> ArgumentAnalysisReport:
         )
 
     prompt = f"""
-    Misi Anda adalah menganalisis teks berikut untuk mendeteksi adanya logical fallacy (kesalahan logika) 
-    dan menilai kualitas argumennya secara keseluruhan.
-    
-    Tipe logical fallacy yang perlu Anda perhatikan secara khusus meliputi:
-    - Ad hominem (menyerang karakter pribadi, bukan argumen)
-    - Cherry-picking (memilih fakta/data secara selektif)
-    - False comparison (membandingkan dua hal yang tidak setara)
-    - Temporal anchoring fallacy (memilih baseline waktu yang menguntungkan secara strategis untuk menyalahkan kondisi saat ini)
-    - Economic chain blindness (gagal melihat runtutan efek dari sebuah kebijakan ekonomi)
-    - Whataboutism (mengalihkan isu dengan membawa masalah lain yang tidak relevan)
-    - Appeal to majority (menggunakan suara terbanyak sebagai jaminan kebenaran)
+Anda adalah seorang analis logika yang sangat teliti. Tugas Anda adalah MENGULIK SETIAP SUDUT teks berikut
+untuk menemukan SEMUA logical fallacy (kesalahan logika) yang ada — sekecil apapun.
 
-    Berikan hasil analisis Anda dalam format JSON terstruktur dengan skema berikut:
-    - argument_quality_score: Skor antara 0-100. Semakin banyak fallacy dan semakin lemah argumennya, skor semakin mendekati 0.
-    - fallacies: Array objek berisi fallacy_type, quote (kutipan persis dari teks), dan explanation (penjelasan mendidik dalam Bahasa Indonesia).
-    - general_feedback: Evaluasi konstruktif dan ramah (tidak menghakimi) dalam Bahasa Indonesia.
+JANGAN HANYA MENYEBUTKAN SATU FALLACY. Jika ada lebih dari satu, LAPORKAN SEMUA YANG ANDA TEMUKAN.
+Bersikap kritis dan jangan lewatkan fallacy yang subtil.
 
-    Teks yang dianalisis:
-    "{text}"
-    """
+Tipe logical fallacy yang perlu Anda deteksi meliputi (NAMUN TIDAK TERBATAS PADA):
+- Ad hominem (menyerang karakter pribadi, bukan argumen)
+- Straw man (menggambarkan argumen lawan secara keliru/simplifikasi berlebihan)
+- Cherry-picking (memilih fakta/data secara selektif)
+- False comparison / False analogy (membandingkan dua hal yang tidak setara)
+- Temporal anchoring fallacy (memilih baseline waktu yang menguntungkan secara strategis)
+- Economic chain blindness (gagal melihat runtutan efek dari sebuah kebijakan)
+- Whataboutism (mengalihkan isu dengan membawa masalah lain yang tidak relevan)
+- Appeal to majority / Bandwagon (menggunakan suara terbanyak sebagai jaminan kebenaran)
+- Circular reasoning (kesimpulan hanya mengulang premis yang sama)
+- Hasty generalization (generalisasi berdasarkan data yang tidak mencukupi)
+- False dilemma / Black-and-white (menyajikan hanya dua pilihan padahal ada lebih)
+- Slippery slope (mengklaim satu langkah pasti berujung konsekuensi ekstrem tanpa bukti)
+- Loaded question (pertanyaan yang mengandung asumsi tak terbukti)
+- Appeal to emotion (mengandalkan emosi, bukan logika)
+
+Berikan hasil analisis dalam format JSON:
+- argument_quality_score: Skor 0-100 (semakin banyak fallacy, semakin rendah)
+- fallacies: Array objek. WAJIB BERISI SEMUA FALLACY YANG DITEMUKAN. JANGAN HANYA SATU.
+  Setiap objek: fallacy_type, quote (kutipan persis), explanation (penjelasan dalam Bahasa Indonesia)
+- general_feedback: Evaluasi konstruktif dalam Bahasa Indonesia
+
+Teks yang dianalisis:
+"{text}"
+"""
 
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(
-            prompt,
-            generation_config={"response_mime_type": "application/json"}
+        response = client.models.generate_content(
+            model="models/gemini-2.5-flash",
+            contents=prompt,
+            config={"response_mime_type": "application/json"}
         )
-        # Parse output ke model Pydantic
-        import json
         data = json.loads(response.text)
         return ArgumentAnalysisReport(**data)
     except Exception as e:
